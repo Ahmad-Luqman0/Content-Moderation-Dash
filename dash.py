@@ -58,8 +58,9 @@ st.plotly_chart(fig1, use_container_width=True)
 # --- 2. Session Duration (Binned Bar Chart) ---
 st.subheader("Session Duration Distribution")
 
-# group by session
 session_df = df.groupby("session_id", as_index=False).agg({"session_duration": "first"})
+session_df = session_df.reset_index(drop=True)
+session_df["session_number"] = session_df.index + 1  # sequential session numbers
 
 # Bin session durations
 bins = [0, 30, 60, 120, 300, 600, 1800, 3600, 7200]
@@ -74,7 +75,10 @@ labels = [
     "3601-7200s",
 ]
 session_df["duration_bin"] = pd.cut(
-    session_df["session_duration"].fillna(0), bins=bins, labels=labels, right=True
+    session_df["session_duration"].fillna(0),
+    bins=bins,
+    labels=labels,
+    right=True,
 )
 
 duration_counts = session_df.groupby("duration_bin").size().reset_index(name="count")
@@ -129,6 +133,25 @@ else:
 st.subheader("Total Video Count")
 total_videos = df["videoId"].nunique()
 st.metric("Total Unique Videos Watched", total_videos)
+
+# --- 4b. Unique Videos Watched per Session (Line Chart) ---
+st.subheader("Unique Videos Watched per Session")
+
+videos_per_session = (
+    df.groupby("session_id")["videoId"].nunique().reset_index(name="unique_videos")
+)
+videos_per_session = videos_per_session.reset_index(drop=True)
+videos_per_session["session_number"] = videos_per_session.index + 1
+
+fig4b = px.line(
+    videos_per_session,
+    x="session_number",
+    y="unique_videos",
+    markers=True,
+    title="Unique Videos Watched per Session",
+    labels={"session_number": "Session Number", "unique_videos": "Unique Videos"},
+)
+st.plotly_chart(fig4b, use_container_width=True)
 
 # --- 5. Acceptance vs Rejection ---
 st.subheader("Acceptance vs Rejection")
