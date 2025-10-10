@@ -1,23 +1,22 @@
-# --- Imports ---
 from pymongo import MongoClient
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# --- MongoDB Connection ---
+# --- MongoDB Connection --- #
 MONGO_URI = "mongodb+srv://admin:ahmad@cluster0.oyvzkiz.mongodb.net/test"
 client = MongoClient(MONGO_URI)
 db = client["test"]
 users = db["users"]
 
-# --- Extract Data (Videos) ---
+# --- Extract Data (Videos) --- #
 pipeline = [
     {"$unwind": "$sessions"},
     {"$unwind": "$sessions.videos"},
     {
         "$project": {
             "username": 1,
-            "session_id": {"$toString": "$sessions._id"},  # Convert ObjectId to string
+            "session_id": {"$toString": "$sessions._id"},
             "session_start": "$sessions.starttime",
             "session_end": "$sessions.endtime",
             "session_duration": "$sessions.duration",
@@ -26,6 +25,7 @@ pipeline = [
             "loopTime": "$sessions.videos.loopTime",
             "videoId": "$sessions.videos.videoId",
             "keys": "$sessions.videos.keys",
+            "soundMuted": "$sessions.videos.soundMuted",
         }
     },
 ]
@@ -37,7 +37,7 @@ if df.empty:
     st.error("No data found in MongoDB!")
     st.stop()
 
-# --- Sidebar ---
+# --- Sidebar --- #
 st.sidebar.title("Filters")
 usernames = ["ALL"] + sorted(df["username"].dropna().unique().tolist())
 selected_user = st.sidebar.selectbox("Select User", usernames)
@@ -47,7 +47,7 @@ if selected_user != "ALL":
 
 st.title("Content Moderation Dashboard")
 
-# --- 1. Video Completion Status Pie Chart ---
+# ---  Video Completion Status Pie Chart --- #
 st.subheader("Video Completion Status Distribution")
 fig1 = px.pie(df, names="status", title=f"Video Completion Status for {selected_user}")
 fig1.update_traces(
@@ -55,14 +55,13 @@ fig1.update_traces(
 )
 st.plotly_chart(fig1, use_container_width=True)
 
-# --- 2. Session Duration (Binned Bar Chart) ---
+# ---  Session Duration (Binned Bar Chart) --- #
 st.subheader("Session Duration Distribution")
 
 session_df = df.groupby("session_id", as_index=False).agg({"session_duration": "first"})
 session_df = session_df.reset_index(drop=True)
-session_df["session_number"] = session_df.index + 1  # sequential session numbers
+session_df["session_number"] = session_df.index + 1
 
-# Bin session durations
 bins = [0, 30, 60, 120, 300, 600, 1800, 3600, 7200]
 labels = [
     "0-30s",
@@ -92,7 +91,7 @@ fig2 = px.bar(
 )
 st.plotly_chart(fig2, use_container_width=True)
 
-# --- 3. Idle Time Distribution ---
+# ---  Idle Time Distribution --- #
 st.subheader("Idle Time Distribution")
 pipeline_idle = [
     {"$unwind": "$sessions"},
@@ -113,7 +112,7 @@ if not idle_df.empty:
     if selected_user != "ALL":
         idle_df = idle_df[idle_df["username"] == selected_user]
 
-    idle_df = idle_df.dropna(subset=["idle_duration"])  # remove null durations
+    idle_df = idle_df.dropna(subset=["idle_duration"])
 
     if not idle_df.empty:
         fig3 = px.histogram(
@@ -129,12 +128,12 @@ if not idle_df.empty:
 else:
     st.info("No idle time data available.")
 
-# --- 4. Total Video Count ---
+# --- Total Video Count ---  #
 st.subheader("Total Video Count")
 total_videos = df["videoId"].nunique()
 st.metric("Total Unique Videos Watched", total_videos)
 
-# --- 4b. Unique Videos Watched per Session (Line Chart) ---
+# --- Unique Videos Watched per Session (Line Chart) ---  #
 st.subheader("Unique Videos Watched per Session")
 
 videos_per_session = (
@@ -153,7 +152,7 @@ fig4b = px.line(
 )
 st.plotly_chart(fig4b, use_container_width=True)
 
-# --- 5. Acceptance vs Rejection ---
+# --- Acceptance vs Rejection ---  #
 st.subheader("Acceptance vs Rejection")
 
 
@@ -177,3 +176,74 @@ fig5 = px.histogram(
     title="Acceptance vs Rejection",
 )
 st.plotly_chart(fig5, use_container_width=True)
+
+# --- Sound Muted vs Not Muted --- #
+st.subheader("Sound Status Distribution")
+
+# Clean and process sound muted data
+df_sound = df.dropna(subset=["soundMuted"])  # Remove rows without sound data
+
+if not df_sound.empty:
+    # Count muted vs not muted videos
+    sound_counts = df_sound["soundMuted"].value_counts().reset_index()
+    sound_counts.columns = ["sound_status", "count"]
+    
+    # Create a more readable mapping
+    sound_counts["sound_status"] = sound_counts["sound_status"].map({
+        "yes": "Muted",
+        "no": "Not Muted"
+    })
+    
+    # Remove any unmapped values
+    sound_counts = sound_counts.dropna(subset=["sound_status"])
+    
+    if not sound_counts.empty:
+        # Create pie chart for sound status distribution
+        fig6 = px.pie(
+            sound_counts,
+            names="sound_status",
+            values="count",
+            title=f"Sound Status Distribution for {selected_user}",
+            color_discrete_map={"Muted": "#ff6b6b", "Not Muted": "#4ecdc4"}
+        )
+        fig6.update_traces(
+            hovertemplate="<b>%{label}</b><br>Videos: %{value}<br>Percentage: %{percent}"
+        )
+        st.plotly_chart(fig6, use_container_width=True)
+        
+        # Create bar chart for better comparison
+        fig7 = px.bar(
+            sound_counts,
+            x="sound_status",
+            y="count",
+            title=f"Sound Status Count for {selected_user}",
+            color="sound_status",
+            color_discrete_map={"Muted": "#ff6b6b", "Not Muted": "#4ecdc4"}
+        )
+        fig7.update_traces(
+            hovertemplate="<b>%{x}</b><br>Count: %{y}"
+        )
+        st.plotly_chart(fig7, use_container_width=True)
+        
+        # Display metrics
+        col1, col2, col3 = st.columns(3)
+        
+        total_sound_videos = sound_counts["count"].sum()
+        muted_videos = sound_counts[sound_counts["sound_status"] == "Muted"]["count"].sum() if not sound_counts[sound_counts["sound_status"] == "Muted"].empty else 0
+        not_muted_videos = sound_counts[sound_counts["sound_status"] == "Not Muted"]["count"].sum() if not sound_counts[sound_counts["sound_status"] == "Not Muted"].empty else 0
+        
+        with col1:
+            st.metric("Total Videos with Sound Data", total_sound_videos)
+        with col2:
+            st.metric("Muted Videos", muted_videos)
+        with col3:
+            st.metric("Not Muted Videos", not_muted_videos)
+            
+        # Calculate percentage
+        if total_sound_videos > 0:
+            muted_percentage = (muted_videos / total_sound_videos) * 100
+            st.info(f"**{muted_percentage:.1f}%** of videos were watched with sound muted")
+    else:
+        st.warning("No valid sound status data found after processing.")
+else:
+    st.info("No sound muted data available for the selected user.")
