@@ -6,8 +6,7 @@ import streamlit as st
 # --- PostgreSQL Connection --- #
 # Replace with your actual PostgreSQL connection string
 # Format: postgresql://username:password@host:port/database_name
-DB_URI = "postgresql://postgres:postgres@localhost:5432/your_database_name"
-
+DB_URI = "postgresql://postgres.nhmrfxrpwjeufaxgukes:luqmanahmad1@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
 @st.cache_resource
 def get_connection():
     return create_engine(DB_URI)
