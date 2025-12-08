@@ -7,6 +7,7 @@ import streamlit as st
 # Replace with your actual PostgreSQL connection string
 # Format: postgresql://username:password@host:port/database_name
 DB_URI = "postgresql://postgres.nhmrfxrpwjeufaxgukes:luqmanahmad1@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+
 @st.cache_resource
 def get_connection():
     return create_engine(DB_URI)
@@ -67,8 +68,44 @@ st.sidebar.title("Filters")
 usernames = ["ALL"] + sorted(df["username"].dropna().unique().tolist())
 selected_user = st.sidebar.selectbox("Select User", usernames)
 
+# Date Filter
+if not df.empty:
+    df["session_start"] = pd.to_datetime(df["session_start"])
+    min_date = df["session_start"].min().date()
+    max_date = df["session_start"].max().date()
+
+    start_date = st.sidebar.date_input("Start Date", min_date)
+    end_date = st.sidebar.date_input("End Date", max_date)
+
+    if start_date > end_date:
+        st.error("Error: End Date must fall after Start Date.")
+
+# Filter by User
 if selected_user != "ALL":
     df = df[df["username"] == selected_user]
+
+# Filter by Date
+if not df.empty and start_date and end_date:
+    # Ensure both are date objects for comparison
+    df = df[
+        (df["session_start"].dt.date >= start_date) & 
+        (df["session_start"].dt.date <= end_date)
+    ]
+
+# Download Button
+@st.cache_data
+def convert_df(df):
+    return df.to_csv(index=False).encode('utf-8')
+
+st.sidebar.markdown("---")
+if not df.empty:
+    csv = convert_df(df)
+    st.sidebar.download_button(
+        label="Download Filtered Report",
+        data=csv,
+        file_name='content_moderation_report.csv',
+        mime='text/csv',
+    )
 
 st.title("Content Moderation Dashboard")
 
@@ -124,6 +161,7 @@ idle_query = """
     SELECT 
         u.name as username,
         s.id as session_id,
+        s.starttime as session_start,
         i.type as idle_type,
         i.duration as idle_duration
     FROM inactivity i
@@ -142,6 +180,17 @@ if not idle_df.empty:
     if selected_user != "ALL":
         idle_df = idle_df[idle_df["username"] == selected_user]
 
+    # Filter by Date
+    if start_date and end_date:
+        try:
+            idle_df["session_start"] = pd.to_datetime(idle_df["session_start"])
+            idle_df = idle_df[
+                (idle_df["session_start"].dt.date >= start_date) & 
+                (idle_df["session_start"].dt.date <= end_date)
+            ]
+        except Exception as e:
+            st.warning(f"Could not filter idle time by date: {e}")
+
     idle_df = idle_df.dropna(subset=["idle_duration"])
 
     if not idle_df.empty:
@@ -154,7 +203,7 @@ if not idle_df.empty:
         )
         st.plotly_chart(fig3, use_container_width=True)
     else:
-        st.info("No idle time durations available.")
+        st.info("No idle time durations available for the selected range.")
 else:
     st.info("No idle time data available.")
 
