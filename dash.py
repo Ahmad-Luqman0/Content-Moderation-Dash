@@ -1,40 +1,66 @@
-from pymongo import MongoClient
+from sqlalchemy import create_engine, text
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-# --- MongoDB Connection --- #
-MONGO_URI = "mongodb+srv://admin:ahmad@cluster0.oyvzkiz.mongodb.net/test"
-client = MongoClient(MONGO_URI)
-db = client["test"]
-users = db["users"]
+# --- PostgreSQL Connection --- #
+# Replace with your actual PostgreSQL connection string
+# Format: postgresql://username:password@host:port/database_name
+DB_URI = "postgresql://postgres:postgres@localhost:5432/your_database_name"
+
+@st.cache_resource
+def get_connection():
+    return create_engine(DB_URI)
+
+try:
+    engine = get_connection()
+    # Test connection
+    with engine.connect() as conn:
+        pass
+except Exception as e:
+    st.error(f"Failed to connect to database: {e}")
+    st.info("Please update the 'DB_URI' in the code with your PostgreSQL credentials.")
+    st.stop()
 
 # --- Extract Data (Videos) --- #
-pipeline = [
-    {"$unwind": "$sessions"},
-    {"$unwind": "$sessions.videos"},
-    {
-        "$project": {
-            "username": 1,
-            "session_id": {"$toString": "$sessions._id"},
-            "session_start": "$sessions.starttime",
-            "session_end": "$sessions.endtime",
-            "session_duration": "$sessions.duration",
-            "status": "$sessions.videos.status",
-            "watched": "$sessions.videos.watched",
-            "loopTime": "$sessions.videos.loopTime",
-            "videoId": "$sessions.videos.videoId",
-            "keys": "$sessions.videos.keys",
-            "soundMuted": "$sessions.videos.soundMuted",
-        }
-    },
-]
+# Query to fetch video-level data with user and session info
+# We aggregate keys for each video since one video can have multiple keys
+videos_query = """
+    SELECT 
+        u.name as username,
+        s.id as session_id,
+        s.starttime as session_start,
+        s.endtime as session_end,
+        s.duration as session_duration,
+        v.status,
+        v.watched,
+        v.loop_time as "loopTime",
+        v.video_id as "videoId",
+        v.sound_muted as "soundMuted",
+        ARRAY_AGG(vk.key_value) FILTER (WHERE vk.key_value IS NOT NULL) as keys
+    FROM videos v
+    JOIN sessions s ON v.session_id = s.id
+    JOIN users u ON s.user_id = u.id
+    LEFT JOIN video_keys vk ON v.id = vk.video_id
+    GROUP BY 
+        u.name, s.id, s.starttime, s.endtime, s.duration, 
+        v.id, v.status, v.watched, v.loop_time, v.video_id, v.sound_muted
+"""
 
-data = list(users.aggregate(pipeline))
-df = pd.DataFrame(data)
+try:
+    with engine.connect() as conn:
+        df = pd.read_sql(text(videos_query), conn)
+        
+    # Ensure keys is a list, even if empty/None (pandas might handle array_agg as list or numpy array)
+    # The existing code expects a list for 'classify_key' function
+    df['keys'] = df['keys'].apply(lambda x: x if isinstance(x, list) else [])
+
+except Exception as e:
+    st.error(f"Error fetching data: {e}")
+    st.stop()
 
 if df.empty:
-    st.error("No data found in MongoDB!")
+    st.error("No data found in PostgreSQL!")
     st.stop()
 
 # --- Sidebar --- #
@@ -93,20 +119,25 @@ st.plotly_chart(fig2, use_container_width=True)
 
 # ---  Idle Time Distribution --- #
 st.subheader("Idle Time Distribution")
-pipeline_idle = [
-    {"$unwind": "$sessions"},
-    {"$unwind": {"path": "$sessions.inactivity", "preserveNullAndEmptyArrays": True}},
-    {
-        "$project": {
-            "username": 1,
-            "session_id": {"$toString": "$sessions._id"},
-            "idle_type": "$sessions.inactivity.type",
-            "idle_duration": "$sessions.inactivity.duration",
-        }
-    },
-]
-idle_data = list(users.aggregate(pipeline_idle))
-idle_df = pd.DataFrame(idle_data)
+
+# Query to fetch inactivity data
+idle_query = """
+    SELECT 
+        u.name as username,
+        s.id as session_id,
+        i.type as idle_type,
+        i.duration as idle_duration
+    FROM inactivity i
+    JOIN sessions s ON i.session_id = s.id
+    JOIN users u ON s.user_id = u.id
+"""
+
+try:
+    with engine.connect() as conn:
+        idle_df = pd.read_sql(text(idle_query), conn)
+except Exception as e:
+    st.error(f"Error fetching idle data: {e}")
+    idle_df = pd.DataFrame()
 
 if not idle_df.empty:
     if selected_user != "ALL":
@@ -159,7 +190,7 @@ st.subheader("Acceptance vs Rejection")
 def classify_key(keys):
     if not keys or not isinstance(keys, list):
         return "No Decision"
-    keys_lower = [str(k).lower() for k in keys]
+    keys_lower = [str(k).lower() for k in keys if k is not None]
     if "a" in keys_lower:
         return "Accepted"
     if "q" in keys_lower:
@@ -189,13 +220,25 @@ if not df_sound.empty:
     sound_counts.columns = ["sound_status", "count"]
     
     # Create a more readable mapping
+    # Assuming standard "yes"/"no" or similar from DB. 
+    # If DB has different values, this map might need adjustment or just show raw values if strict mapping fails.
+    # The original code mapped "yes"->"Muted", "no"->"Not Muted".
+    
+    # We will try to handle case-insensitivity or potential differnet values if known, 
+    # otherwise we stick to the original map logic.
     sound_counts["sound_status"] = sound_counts["sound_status"].map({
         "yes": "Muted",
-        "no": "Not Muted"
-    })
+        "no": "Not Muted",
+        "true": "Muted",  # Handling potential boolean-like strings
+        "false": "Not Muted"
+    }).fillna(sound_counts["sound_status"]) # Fallback to original value if not mapped
     
-    # Remove any unmapped values
-    sound_counts = sound_counts.dropna(subset=["sound_status"])
+    # Remove any unmapped values if strictly following original logic which did dropna(subset=["sound_status"]) after mapping?
+    # Original: sound_counts = sound_counts.dropna(subset=["sound_status"]) 
+    # This implies only "yes" and "no" were kept. Let's try to keep it robust.
+    
+    # If the map keys matched, we keep them. If they didn't, we might have raw values like "YES" or boolean.
+    # Ideally standardizing the column content.
     
     if not sound_counts.empty:
         # Create pie chart for sound status distribution
@@ -229,8 +272,9 @@ if not df_sound.empty:
         col1, col2, col3 = st.columns(3)
         
         total_sound_videos = sound_counts["count"].sum()
-        muted_videos = sound_counts[sound_counts["sound_status"] == "Muted"]["count"].sum() if not sound_counts[sound_counts["sound_status"] == "Muted"].empty else 0
-        not_muted_videos = sound_counts[sound_counts["sound_status"] == "Not Muted"]["count"].sum() if not sound_counts[sound_counts["sound_status"] == "Not Muted"].empty else 0
+        # Be careful to match the mapped names "Muted" / "Not Muted"
+        muted_videos = sound_counts[sound_counts["sound_status"] == "Muted"]["count"].sum()
+        not_muted_videos = sound_counts[sound_counts["sound_status"] == "Not Muted"]["count"].sum()
         
         with col1:
             st.metric("Total Videos with Sound Data", total_sound_videos)
