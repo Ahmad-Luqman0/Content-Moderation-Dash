@@ -65,7 +65,19 @@ if df.empty:
 
 # --- Sidebar --- #
 st.sidebar.title("Filters")
-usernames = ["ALL"] + sorted(df["username"].dropna().unique().tolist())
+
+# Fetch all users for the dropdown, regardless of whether they have data
+users_query = "SELECT name FROM users ORDER BY name"
+try:
+    with engine.connect() as conn:
+        users_df = pd.read_sql(text(users_query), conn)
+        all_usernames = ["ALL"] + users_df["name"].tolist()
+except Exception as e:
+    st.error(f"Error fetching users: {e}")
+    # Fallback to existing logic if query fails
+    all_usernames = ["ALL"] + sorted(df["username"].dropna().unique().tolist())
+
+usernames = all_usernames
 selected_user = st.sidebar.selectbox("Select User", usernames)
 
 # Date Filter
@@ -108,6 +120,10 @@ if not df.empty:
     )
 
 st.title("Content Moderation Dashboard")
+
+if df.empty:
+    st.info(f"No activity data found for user '{selected_user}' in the selected date range.")
+    st.stop()
 
 # ---  Video Completion Status Pie Chart --- #
 st.subheader("Video Completion Status Distribution")
