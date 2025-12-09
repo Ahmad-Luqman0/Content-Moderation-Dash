@@ -4,13 +4,13 @@ import plotly.express as px
 import streamlit as st
 
 # --- PostgreSQL Connection --- #
-# Replace with your actual PostgreSQL connection string
-# Format: postgresql://username:password@host:port/database_name
 DB_URI = "postgresql://postgres.nhmrfxrpwjeufaxgukes:luqmanahmad1@aws-1-ap-southeast-2.pooler.supabase.com:6543/postgres"
+
 
 @st.cache_resource
 def get_connection():
     return create_engine(DB_URI)
+
 
 try:
     engine = get_connection()
@@ -50,10 +50,10 @@ videos_query = """
 try:
     with engine.connect() as conn:
         df = pd.read_sql(text(videos_query), conn)
-        
+
     # Ensure keys is a list, even if empty/None (pandas might handle array_agg as list or numpy array)
     # The existing code expects a list for 'classify_key' function
-    df['keys'] = df['keys'].apply(lambda x: x if isinstance(x, list) else [])
+    df["keys"] = df["keys"].apply(lambda x: x if isinstance(x, list) else [])
 
 except Exception as e:
     st.error(f"Error fetching data: {e}")
@@ -80,6 +80,17 @@ except Exception as e:
 usernames = all_usernames
 selected_user = st.sidebar.selectbox("Select User", usernames)
 
+# Session Filter (depends on selected user)
+if selected_user != "ALL":
+    user_sessions = df[df["username"] == selected_user]["session_id"].unique().tolist()
+    user_sessions_sorted = sorted(user_sessions)
+    session_options = ["ALL"] + [
+        f"Session {i+1} (ID: {sid})" for i, sid in enumerate(user_sessions_sorted)
+    ]
+    selected_session = st.sidebar.selectbox("Select Session", session_options)
+else:
+    selected_session = "ALL"
+
 # Date Filter
 if not df.empty:
     df["session_start"] = pd.to_datetime(df["session_start"])
@@ -96,18 +107,26 @@ if not df.empty:
 if selected_user != "ALL":
     df = df[df["username"] == selected_user]
 
+# Filter by Session
+if selected_user != "ALL" and selected_session != "ALL":
+    # Extract session ID from the selected session string
+    session_id = selected_session.split("ID: ")[1].rstrip(")")
+    df = df[df["session_id"] == session_id]
+
 # Filter by Date
 if not df.empty and start_date and end_date:
     # Ensure both are date objects for comparison
     df = df[
-        (df["session_start"].dt.date >= start_date) & 
-        (df["session_start"].dt.date <= end_date)
+        (df["session_start"].dt.date >= start_date)
+        & (df["session_start"].dt.date <= end_date)
     ]
+
 
 # Download Button
 @st.cache_data
 def convert_df(df):
-    return df.to_csv(index=False).encode('utf-8')
+    return df.to_csv(index=False).encode("utf-8")
+
 
 st.sidebar.markdown("---")
 if not df.empty:
@@ -115,14 +134,16 @@ if not df.empty:
     st.sidebar.download_button(
         label="Download Filtered Report",
         data=csv,
-        file_name='content_moderation_report.csv',
-        mime='text/csv',
+        file_name="content_moderation_report.csv",
+        mime="text/csv",
     )
 
 st.title("Content Moderation Dashboard")
 
 if df.empty:
-    st.info(f"No activity data found for user '{selected_user}' in the selected date range.")
+    st.info(
+        f"No activity data found for user '{selected_user}' in the selected date range."
+    )
     st.stop()
 
 # ---  Video Completion Status Pie Chart --- #
@@ -201,8 +222,8 @@ if not idle_df.empty:
         try:
             idle_df["session_start"] = pd.to_datetime(idle_df["session_start"])
             idle_df = idle_df[
-                (idle_df["session_start"].dt.date >= start_date) & 
-                (idle_df["session_start"].dt.date <= end_date)
+                (idle_df["session_start"].dt.date >= start_date)
+                & (idle_df["session_start"].dt.date <= end_date)
             ]
         except Exception as e:
             st.warning(f"Could not filter idle time by date: {e}")
@@ -282,28 +303,34 @@ if not df_sound.empty:
     # Count muted vs not muted videos
     sound_counts = df_sound["soundMuted"].value_counts().reset_index()
     sound_counts.columns = ["sound_status", "count"]
-    
+
     # Create a more readable mapping
-    # Assuming standard "yes"/"no" or similar from DB. 
+    # Assuming standard "yes"/"no" or similar from DB.
     # If DB has different values, this map might need adjustment or just show raw values if strict mapping fails.
     # The original code mapped "yes"->"Muted", "no"->"Not Muted".
-    
-    # We will try to handle case-insensitivity or potential differnet values if known, 
+
+    # We will try to handle case-insensitivity or potential differnet values if known,
     # otherwise we stick to the original map logic.
-    sound_counts["sound_status"] = sound_counts["sound_status"].map({
-        "yes": "Muted",
-        "no": "Not Muted",
-        "true": "Muted",  # Handling potential boolean-like strings
-        "false": "Not Muted"
-    }).fillna(sound_counts["sound_status"]) # Fallback to original value if not mapped
-    
+    sound_counts["sound_status"] = (
+        sound_counts["sound_status"]
+        .map(
+            {
+                "yes": "Muted",
+                "no": "Not Muted",
+                "true": "Muted",  # Handling potential boolean-like strings
+                "false": "Not Muted",
+            }
+        )
+        .fillna(sound_counts["sound_status"])
+    )  # Fallback to original value if not mapped
+
     # Remove any unmapped values if strictly following original logic which did dropna(subset=["sound_status"]) after mapping?
-    # Original: sound_counts = sound_counts.dropna(subset=["sound_status"]) 
+    # Original: sound_counts = sound_counts.dropna(subset=["sound_status"])
     # This implies only "yes" and "no" were kept. Let's try to keep it robust.
-    
+
     # If the map keys matched, we keep them. If they didn't, we might have raw values like "YES" or boolean.
     # Ideally standardizing the column content.
-    
+
     if not sound_counts.empty:
         # Create pie chart for sound status distribution
         fig6 = px.pie(
@@ -311,13 +338,13 @@ if not df_sound.empty:
             names="sound_status",
             values="count",
             title=f"Sound Status Distribution for {selected_user}",
-            color_discrete_map={"Muted": "#ff6b6b", "Not Muted": "#4ecdc4"}
+            color_discrete_map={"Muted": "#ff6b6b", "Not Muted": "#4ecdc4"},
         )
         fig6.update_traces(
             hovertemplate="<b>%{label}</b><br>Videos: %{value}<br>Percentage: %{percent}"
         )
         st.plotly_chart(fig6, use_container_width=True)
-        
+
         # Create bar chart for better comparison
         fig7 = px.bar(
             sound_counts,
@@ -325,32 +352,36 @@ if not df_sound.empty:
             y="count",
             title=f"Sound Status Count for {selected_user}",
             color="sound_status",
-            color_discrete_map={"Muted": "#ff6b6b", "Not Muted": "#4ecdc4"}
+            color_discrete_map={"Muted": "#ff6b6b", "Not Muted": "#4ecdc4"},
         )
-        fig7.update_traces(
-            hovertemplate="<b>%{x}</b><br>Count: %{y}"
-        )
+        fig7.update_traces(hovertemplate="<b>%{x}</b><br>Count: %{y}")
         st.plotly_chart(fig7, use_container_width=True)
-        
+
         # Display metrics
         col1, col2, col3 = st.columns(3)
-        
+
         total_sound_videos = sound_counts["count"].sum()
         # Be careful to match the mapped names "Muted" / "Not Muted"
-        muted_videos = sound_counts[sound_counts["sound_status"] == "Muted"]["count"].sum()
-        not_muted_videos = sound_counts[sound_counts["sound_status"] == "Not Muted"]["count"].sum()
-        
+        muted_videos = sound_counts[sound_counts["sound_status"] == "Muted"][
+            "count"
+        ].sum()
+        not_muted_videos = sound_counts[sound_counts["sound_status"] == "Not Muted"][
+            "count"
+        ].sum()
+
         with col1:
             st.metric("Total Videos with Sound Data", total_sound_videos)
         with col2:
             st.metric("Muted Videos", muted_videos)
         with col3:
             st.metric("Not Muted Videos", not_muted_videos)
-            
+
         # Calculate percentage
         if total_sound_videos > 0:
             muted_percentage = (muted_videos / total_sound_videos) * 100
-            st.info(f"**{muted_percentage:.1f}%** of videos were watched with sound muted")
+            st.info(
+                f"**{muted_percentage:.1f}%** of videos were watched with sound muted"
+            )
     else:
         st.warning("No valid sound status data found after processing.")
 else:
