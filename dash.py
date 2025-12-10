@@ -386,3 +386,100 @@ if not df_sound.empty:
         st.warning("No valid sound status data found after processing.")
 else:
     st.info("No sound muted data available for the selected user.")
+
+# --- Video Playback Speeds Analysis --- #
+st.subheader("Video Playback Speeds Analysis")
+
+# Query to fetch video speeds data
+speeds_query = """
+    SELECT 
+        u.name as username,
+        s.id as session_id,
+        s.starttime as session_start,
+        v.video_id,
+        vs.speed_value,
+        vs.created_at as speed_timestamp
+    FROM video_speeds vs
+    JOIN videos v ON vs.video_id = v.id
+    JOIN sessions s ON v.session_id = s.id
+    JOIN users u ON s.user_id = u.id
+"""
+
+try:
+    with engine.connect() as conn:
+        speeds_df = pd.read_sql(text(speeds_query), conn)
+except Exception as e:
+    st.error(f"Error fetching video speeds data: {e}")
+    speeds_df = pd.DataFrame()
+
+if not speeds_df.empty:
+    # Apply user filter
+    if selected_user != "ALL":
+        speeds_df = speeds_df[speeds_df["username"] == selected_user]
+
+    # Apply session filter
+    if selected_user != "ALL" and selected_session != "ALL":
+        session_id = selected_session.split("ID: ")[1].rstrip(")")
+        speeds_df = speeds_df[speeds_df["session_id"] == session_id]
+
+    # Filter by Date
+    if start_date and end_date:
+        try:
+            speeds_df["session_start"] = pd.to_datetime(speeds_df["session_start"])
+            speeds_df = speeds_df[
+                (speeds_df["session_start"].dt.date >= start_date)
+                & (speeds_df["session_start"].dt.date <= end_date)
+            ]
+        except Exception as e:
+            st.warning(f"Could not filter video speeds by date: {e}")
+
+    speeds_df = speeds_df.dropna(subset=["speed_value"])
+
+    if not speeds_df.empty:
+        # Speed Distribution - Bar Chart
+        speed_counts = speeds_df["speed_value"].value_counts().reset_index()
+        speed_counts.columns = ["speed", "count"]
+        speed_counts = speed_counts.sort_values("speed")
+
+        fig_speed_bar = px.bar(
+            speed_counts,
+            x="speed",
+            y="count",
+            title=f"Video Playback Speed Usage Count for {selected_user}",
+            labels={"speed": "Playback Speed (x)", "count": "Number of Videos"},
+            color="speed",
+            color_continuous_scale="Viridis",
+        )
+        fig_speed_bar.update_traces(hovertemplate="<b>Speed: %{x}x</b><br>Count: %{y}")
+        st.plotly_chart(fig_speed_bar, use_container_width=True)
+
+        # Average Speed per Session - Line Chart
+        avg_speed_per_session = (
+            speeds_df.groupby("session_id")["speed_value"].mean().reset_index()
+        )
+        avg_speed_per_session.columns = ["session_id", "avg_speed"]
+        avg_speed_per_session = avg_speed_per_session.sort_values(
+            "session_id"
+        ).reset_index(drop=True)
+        avg_speed_per_session["session_number"] = avg_speed_per_session.index + 1
+
+        fig_avg_speed = px.line(
+            avg_speed_per_session,
+            x="session_number",
+            y="avg_speed",
+            markers=True,
+            title="Average Playback Speed per Session",
+            labels={
+                "session_number": "Session Number",
+                "avg_speed": "Average Speed (x)",
+            },
+        )
+        fig_avg_speed.update_traces(
+            hovertemplate="<b>Session %{x}</b><br>Avg Speed: %{y:.2f}x"
+        )
+        st.plotly_chart(fig_avg_speed, use_container_width=True)
+
+    else:
+        st.info("No video speed data available after applying filters.")
+else:
+    st.info("No video speed data available in the database.")
