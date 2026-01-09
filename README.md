@@ -1,14 +1,14 @@
 
-# Content Moderation Dashboard (MongoDB + Streamlit + Plotly)
+# Content Moderation Dashboard (PostGres + Streamlit + Plotly)
 
-This project is an interactive data analytics dashboard built with **Streamlit**, **MongoDB**, and **Plotly**.  
-It allows moderators and analysts to visualize user engagement patterns, session statistics, and behavioral metrics from stored MongoDB data.
+This project is an interactive data analytics dashboard built with **Streamlit**, **PostGres**, and **Plotly**.  
+It allows moderators and analysts to visualize user engagement patterns, session statistics, and behavioral metrics from stored PostGres data.
 
 ---
 
 ## Overview
 
-The dashboard connects to a MongoDB database containing user session and video activity data.  
+The dashboard connects to a PostGres database containing user session and video activity data.  
 It provides insights into metrics such as:
 
 - Video completion status  
@@ -54,7 +54,7 @@ Includes metrics for total, muted, and unmuted video counts, plus muted percenta
 
 ### Prerequisites
 - Python 3.8 or above
-- MongoDB instance or cluster (with the appropriate connection URI)
+- PostGres instance or cluster (with the appropriate connection URI)
 - Streamlit
 - Plotly
 - Pandas
@@ -73,9 +73,9 @@ Includes metrics for total, muted, and unmuted video counts, plus muted percenta
    pip install -r requirements.txt
    ```
 
-3. Ensure your MongoDB connection URI is set correctly in the script:
+3. Ensure your PostGres connection URI is set correctly in the script:
    ```python
-   MONGO_URI = "your_mongodb_connection_string"
+   MONGO_URI = "your_PostGres_connection_string"
    ```
 
 4. Run the Streamlit app:
@@ -111,7 +111,7 @@ pandas
 
 ---
 
-## MongoDB Structure Overview
+## PostGres Structure Overview
 
 The dashboard expects documents with the following structure:
 
